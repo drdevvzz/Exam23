@@ -1,7 +1,7 @@
 # coding: utf-8
 # license: GPLv3
 
-gravitational_constnt = 6.67408E-11
+gravitational_constant = 6.67408E-11
 """Гравитационная постоянная Ньютона G"""
 
 
