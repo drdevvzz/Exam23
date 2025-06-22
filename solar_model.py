@@ -1,61 +1,149 @@
-# coding: utf-8
-# license: GPLv3
+
+import math
+import random
+
 
 gravitational_constant = 6.67408E-11
-"""Гравитационная постоянная Ньютона G"""
 
 
-def calculate_force(body, space_objects):
-    """Вычисляет силу, действующую на тело.
+class SolarSystemModel:
+    def __init__(self):
+        self.space_objects = []
+        self.physical_time = 0
+        self.scale_factor = None
 
-    Параметры:
+    def calculate_force(self, body):
+        body.Fx = body.Fy = 0
+        for obj in self.space_objects:
+            if body == obj:
+                continue
 
-    **body** — тело, для которого нужно вычислить дейстующую силу.
-    **space_objects** — список объектов, которые воздействуют на тело.
-    """
+            # For satellites, we only calculate force from their parent planet
+            if body.type == 'satellite' and obj != body.parent_planet:
+                continue
 
-    body.Fx = body.Fy = 0
-    for obj in space_objects:
-        if body == obj:
-            continue  # тело не действует гравитационной силой на само себя!
-        r = ((body.x - obj.x)**2 + (body.y - obj.y)**2)**0.5
-        body.Fx += force * r_x/r  # FIXME: нужно вывести формулу...
-        body.Fy += force * r_y/r  # FIXME: нужно вывести формулу...
+            dx = obj.x - body.x
+            dy = obj.y - body.y
+            r = (dx ** 2 + dy ** 2) ** 0.5
 
+            min_distance = 1e9
+            if r < min_distance:
+                repulsion = gravitational_constant * body.m * obj.m / (min_distance ** 2) * 10
+                body.Fx -= repulsion * dx / r
+                body.Fy -= repulsion * dy / r
+            else:
+                force = gravitational_constant * body.m * obj.m / (r ** 2)
+                body.Fx += force * dx / r
+                body.Fy += force * dy / r
 
-def move_space_object(body, dt):
-    """Перемещает тело в соответствии с действующей на него силой.
+    def move_space_object(self, body, dt):
+        if body.type not in ['planet', 'satellite']:
+            return
 
-    Параметры:
+        if body.type == 'planet':
+            central_body = body.parent_star
+            if not central_body:
+                return
 
-    **body** — тело, которое нужно переместить.
-    **dt** — шаг по времени
-    """
+            dx = body.x - central_body.x
+            dy = body.y - central_body.y
+            distance = (dx ** 2 + dy ** 2) ** 0.5
 
-    ax = body.Fx/body.m
-    body.x += body.Vx * dt + (ax*dt**2)/2  # FIXME: не понимаю как менять...
-    body.Vx += ax*dt
+            angular_velocity = (gravitational_constant * central_body.m / distance ** 3) ** 0.5
+            if hasattr(body, 'clockwise'):
+                angular_velocity *= -1 if body.clockwise else 1
 
-    ay = body.Fy / body.m
-    body.y += body.Vy * dt + (ay * dt ** 2) / 2  # FIXME: не понимаю как менять...
-    body.Vy += ay * dt
-    # FIXME: not done recalculation of y coordinate!
+            angle = math.atan2(dy, dx) + angular_velocity * dt
+            body.x = central_body.x + distance * math.cos(angle)
+            body.y = central_body.y + distance * math.sin(angle)
 
+        elif body.type == 'satellite':
+            planet = body.parent_planet
+            if not planet:
+                return
 
-def recalculate_space_objects_positions(space_objects, dt):
-    """Пересчитывает координаты объектов.
+            dx = body.x - planet.x
+            dy = body.y - planet.y
+            distance = (dx ** 2 + dy ** 2) ** 0.5
 
-    Параметры:
+            orbital_speed = (gravitational_constant * planet.m / distance) ** 0.5
 
-    **space_objects** — список оьъектов, для которых нужно пересчитать координаты.
-    **dt** — шаг по времени
-    """
+            current_angle = math.atan2(dy, dx)
+            angular_velocity = orbital_speed / distance
+            new_angle = current_angle + angular_velocity * dt
 
-    for body in space_objects:
-        calculate_force(body, space_objects)
-    for body in space_objects:
-        move_space_object(body, dt)
+            body.x = planet.x + distance * math.cos(new_angle)
+            body.y = planet.y + distance * math.sin(new_angle)
 
+    def recalculate_positions(self, dt):
+        for obj in self.space_objects:
+            if obj.type == 'planet':
+                direction = -1 if obj.clockwise else 1
+                obj.orbit_angle += direction * obj.orbit_speed * dt
 
-if __name__ == "__main__":
-    print("This module is not for direct call!")
+                sx = obj.parent_star.x
+                sy = obj.parent_star.y
+                r = obj.orbit_radius
+
+                obj.x = sx + r * math.cos(obj.orbit_angle)
+                obj.y = sy + r * math.sin(obj.orbit_angle)
+
+                linear_speed = obj.orbit_speed * r
+                obj.Vx = direction * linear_speed * -math.sin(obj.orbit_angle)
+                obj.Vy = direction * linear_speed * math.cos(obj.orbit_angle)
+
+            elif obj.type == 'satellite':
+                direction = -1 if obj.clockwise else 1
+                obj.orbit_angle += direction * obj.orbit_speed * dt
+
+                px = obj.parent_planet.x
+                py = obj.parent_planet.y
+                r = obj.orbit_radius
+
+                obj.x = px + r * math.cos(obj.orbit_angle)
+                obj.y = py + r * math.sin(obj.orbit_angle)
+
+                linear_speed = obj.orbit_speed * r
+                obj.Vx = obj.parent_planet.Vx - direction * linear_speed * math.sin(obj.orbit_angle)
+                obj.Vy = obj.parent_planet.Vy + direction * linear_speed * math.cos(obj.orbit_angle)
+
+            else:
+                obj.x += obj.Vx * dt
+                obj.y += obj.Vy * dt
+        self.check_collisions()
+
+    def check_collisions(self):
+        for i, obj1 in enumerate(self.space_objects):
+            for obj2 in self.space_objects[i + 1:]:
+                if self.objects_collide(obj1, obj2):
+                    self.resolve_collision(obj1, obj2)
+
+    def resolve_collision(self, obj1, obj2):
+        dx = obj1.x - obj2.x
+        dy = obj1.y - obj2.y
+        distance = (dx ** 2 + dy ** 2) ** 0.5
+        min_distance = (obj1.R + obj2.R) * 1e9 * 1.1
+
+        if distance < 1e-9:
+            angle = random.uniform(0, 2 * math.pi)
+            dx = math.cos(angle)
+            dy = math.sin(angle)
+            distance = 1e-9
+
+        correction = (min_distance - distance) / 2
+        correction_x = correction * dx / distance
+        correction_y = correction * dy / distance
+
+        if obj1.type != 'star':
+            obj1.x += correction_x
+            obj1.y += correction_y
+        if obj2.type != 'star':
+            obj2.x -= correction_x
+            obj2.y -= correction_y
+
+    def objects_collide(self, obj1, obj2):
+        min_distance = (obj1.R + obj2.R) * 1e9
+        dx = obj1.x - obj2.x
+        dy = obj1.y - obj2.y
+        distance = (dx ** 2 + dy ** 2) ** 0.5
+        return distance < min_distance
